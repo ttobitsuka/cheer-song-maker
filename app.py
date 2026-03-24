@@ -1,93 +1,84 @@
 import streamlit as st
 import streamlit.components.v1 as components
 
-st.set_page_config(page_title="応援歌メーカー", layout="centered")
+st.set_page_config(page_title="パワプロ風応援歌作成", layout="wide")
 
-st.title("🎺 簡易・応援歌メーカー")
-st.write("パワプロ風に、ドレミでメロディを作ってみよう！")
+st.title("⚾️ パワプロ風・応援歌エディタ")
+st.write("マス目をタップして音を置いてみよう！")
 
-# 1. メロディ入力エリア
-st.subheader("📝 メロディ入力")
-col1, col2 = st.columns([3, 1])
+# 音程の定義（高い順）
+NOTES = ["ド(高)", "シ", "ラ", "ソ", "ファ", "ミ", "レ", "ド"]
+FREQS = [523.25, 493.88, 440.00, 392.00, 349.23, 329.63, 293.66, 261.63]
+# 小節数（とりあえず4拍子×4小節＝16マス）
+STEPS = 16
 
-with col1:
-    # ユーザーが「ドレミ」を入力する
-    melody_input = st.text_area(
-        "ドレミを入力（例: ドレミド レミファレ）",
-        value="ドレミド レミファレ ミファソミ ファソラファ",
-        help="ひらがなで『ド・レ・ミ・ファ・ソ・ラ・シ』を入力してください。スペースで休み（休符）になります。"
-    )
-
-with col2:
-    tempo = st.slider("テンポ", 60, 200, 120)
-
-# 2. 再生機能（JavaScriptを利用してブラウザで音を鳴らす）
-st.subheader("🎵 再生")
-
-# ドレミを周波数に変換するマッピング
-notes_map = {
-    "ド": 261.63, "レ": 293.66, "ミ": 329.63, "ファ": 349.23,
-    "ソ": 392.00, "ラ": 440.00, "シ": 493.88, "ド（高）": 523.25
-}
-
-# 再生用のJavaScriptコード
+# JavaScriptとHTMLでグリッドを作成
 js_code = f"""
-<script>
-const context = new (window.AudioContext || window.webkitAudioContext)();
-const notes = {list(notes_map.keys())};
-const freqs = {list(notes_map.values())};
-const input = "{melody_input}";
-const tempo = {tempo};
+<div id="editor" style="display: grid; grid-template-columns: 80px repeat({STEPS}, 1fr); gap: 2px; background: #333; padding: 5px; border-radius: 5px;">
+    <script>
+    const notes = {NOTES};
+    const freqs = {FREQS};
+    const steps = {STEPS};
+    const grid = [];
 
-function playSong() {{
-    let currentTime = context.currentTime;
-    const noteDuration = 60 / tempo * 0.5; // 8分音符くらいの長さ
-
-    // 文字列を1文字ずつ（または2文字ずつ）解析
-    const melody = input.split(/[\s,、]+/); 
-
-    melody.forEach(symbol => {{
-        const index = notes.indexOf(symbol);
-        if (index !== -1) {{
-            const osc = context.createOscillator();
-            const gain = context.createGain();
-            
-            osc.type = 'square'; // パワプロ風のピコピコ音（矩形波）
-            osc.frequency.setValueAtTime(freqs[index], currentTime);
-            
-            gain.gain.setValueAtTime(0.1, currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.0001, currentTime + noteDuration - 0.05);
-            
-            osc.connect(gain);
-            gain.connect(context.destination);
-            
-            osc.start(currentTime);
-            osc.stop(currentTime + noteDuration);
+    // グリッドの初期化
+    for (let i = 0; i < notes.length; i++) {{
+        document.write(`<div style="color: white; background: #444; padding: 10px; text-align: center; font-size: 12px;">${{notes[i]}}</div>`);
+        grid[i] = [];
+        for (let j = 0; j < steps; j++) {{
+            const id = `cell-${{i}}-${{j}}`;
+            document.write(`<div id="${{id}}" onclick="toggleCell(${{i}}, ${{j}})" style="background: #eee; height: 40px; cursor: pointer; border-radius: 2px;"></div>`);
         }}
-        currentTime += noteDuration;
-    }});
-}}
-</script>
-<button onclick="playSong()" style="
-    background-color: #ff4b4b;
-    color: white;
-    padding: 15px 32px;
-    border: none;
-    border-radius: 8px;
-    cursor: pointer;
-    font-size: 16px;
-    width: 100%;
-">▶ 曲を再生する</button>
+    }}
+
+    function toggleCell(row, col) {{
+        const cell = document.getElementById(`cell-${{row}}-${{col}}`);
+        // 同じ列の他のセルをリセット（単音のみ）
+        for (let i = 0; i < notes.length; i++) {{
+            if (i !== row) {{
+                grid[i][col] = false;
+                document.getElementById(`cell-${{i}}-${{col}}`).style.background = '#eee';
+            }}
+        }}
+        
+        grid[row][col] = !grid[row][col];
+        cell.style.background = grid[row][col] ? '#ff4b4b' : '#eee';
+    }}
+
+    let audioCtx = null;
+    function play() {{
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+
+        let tempo = 120;
+        let noteTime = 60 / tempo * 0.5;
+        let startTime = audioCtx.currentTime;
+
+        for (let j = 0; j < steps; j++) {{
+            for (let i = 0; i < notes.length; i++) {{
+                if (grid[i][j]) {{
+                    const osc = audioCtx.createOscillator();
+                    const gain = audioCtx.createGain();
+                    osc.type = 'square';
+                    osc.frequency.setValueAtTime(freqs[i], startTime + (j * noteTime));
+                    gain.gain.setValueAtTime(0.1, startTime + (j * noteTime));
+                    gain.gain.exponentialRampToValueAtTime(0.001, startTime + (j * noteTime) + noteTime - 0.05);
+                    osc.connect(gain);
+                    gain.connect(audioCtx.destination);
+                    osc.start(startTime + (j * noteTime));
+                    osc.stop(startTime + (j * noteTime) + noteTime);
+                }}
+            }}
+        }}
+    }}
+    </script>
+</div>
+<br>
+<button onclick="play()" style="width: 100%; padding: 15px; background: #008cba; color: white; border: none; border-radius: 5px; font-size: 18px; cursor: pointer;">
+    ▶ 曲を再生する
+</button>
 """
 
-# HTML/JSを表示
-components.html(js_code, height=100)
+components.html(js_code, height=500)
 
-# 3. 歌詞などのメモ
-st.divider()
-st.subheader("💬 歌詞・設定メモ")
-player_name = st.text_input("選手名", "パワプロくん")
-lyrics = st.text_area("歌詞", "かっ飛ばせー！ パワプロくん！")
-
-if st.button("応援歌設定を保存"):
-    st.success(f"【{player_name}】の応援歌を仮保存しました（ブラウザを閉じると消えます）")
+st.info("💡 縦軸が音の高さ、横軸が時間です。マス目をタップして赤い色をつけてから再生してください。")
